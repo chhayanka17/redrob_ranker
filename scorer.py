@@ -32,10 +32,13 @@ RANKING_KEYWORDS = {
 }
 
 
-def score_skills(skills):
-    """Score 0-1 based on skill match, proficiency, and duration."""
+def score_skills(skills, assessment_scores=None):
+    """Score 0-1 based on skill match, proficiency, duration AND trust."""
     if not skills:
         return 0.0
+
+    if assessment_scores is None:
+        assessment_scores = {}
 
     proficiency_weight = {"expert": 1.0, "advanced": 0.75,
                           "intermediate": 0.5, "beginner": 0.25}
@@ -44,19 +47,42 @@ def score_skills(skills):
     for skill in skills:
         name = skill.get("name", "").lower()
         prof = proficiency_weight.get(skill.get("proficiency", "beginner"), 0.25)
-        duration = min(skill.get("duration_months", 0) / 24, 1.0)  # cap at 24 months
-        endorsements = min(skill.get("endorsements", 0) / 20, 1.0)  # cap at 20
+        duration = min(skill.get("duration_months", 0) / 24, 1.0)
+        endorsements = skill.get("endorsements", 0)
+        endorsed_score = min(endorsements / 20, 1.0)
 
-        trust = (0.5 * prof) + (0.3 * duration) + (0.2 * endorsements)
+        # --- SKILL TRUST LAYER ---
+        trust = 1.0
+
+        # Platform assessment score boosts trust
+        for assess_name, assess_score in assessment_scores.items():
+            if any(kw in assess_name.lower() for kw in name.split()):
+                if assess_score > 80:
+                    trust *= 1.3  # verified by platform test
+                elif assess_score > 60:
+                    trust *= 1.1
+                break
+
+        # Expert claim with no endorsements and no duration = suspicious
+        if skill.get("proficiency") == "expert":
+            if endorsements == 0 and skill.get("duration_months", 0) == 0:
+                trust *= 0.3  # likely keyword stuffing
+            elif endorsements == 0:
+                trust *= 0.7  # unverified expert claim
+
+        # Duration validates real usage
+        if duration > 0.5:
+            trust *= 1.1
+
+        skill_score = (0.4 * prof + 0.3 * duration + 0.3 * endorsed_score) * trust
 
         if any(kw in name for kw in MUST_HAVE_SKILLS):
-            matched += 1.5 * trust  # bonus for must-have
+            matched += 1.5 * skill_score
         elif any(kw in name for kw in GOOD_TO_HAVE_SKILLS):
-            matched += 0.8 * trust
+            matched += 0.8 * skill_score
         total += 1.0
 
     return min(matched / max(total, 1), 1.0)
-
 
 def score_career(career_history):
     """Score 0-1 based on career substance — product companies + ranking work."""
@@ -84,6 +110,58 @@ def score_career(career_history):
             ranking_score += 0.4 * weight
 
     return min((product_score + ranking_score) / 3, 1.0)
+
+from dateutil.parser import parse as parse_date
+
+def score_trajectory(career_history):
+    """Score 0-1 based on career growth momentum."""
+    if not career_history or len(career_history) < 2:
+        return 0.5  # neutral for short careers
+
+    # Sort roles by start date (oldest first)
+    try:
+        sorted_career = sorted(
+            career_history,
+            key=lambda r: parse_date(r["start_date"])
+        )
+    except:
+        return 0.5
+
+    SENIORITY_LEVELS = {
+        "intern": 0, "trainee": 0, "junior": 1, "associate": 1,
+        "engineer": 2, "developer": 2, "analyst": 2, "scientist": 2,
+        "senior": 3, "lead": 3, "staff": 3, "principal": 4,
+        "manager": 4, "architect": 4, "head": 5, "director": 5,
+        "vp": 6, "cto": 7
+    }
+
+    def get_level(title):
+        title_lower = title.lower()
+        best = 2  # default mid-level
+        for keyword, level in SENIORITY_LEVELS.items():
+            if keyword in title_lower:
+                best = max(best, level)
+        return best
+
+    levels = [get_level(r["title"]) for r in sorted_career]
+
+    # Count upward moves
+    upward = sum(1 for i in range(1, len(levels)) if levels[i] > levels[i-1])
+    downward = sum(1 for i in range(1, len(levels)) if levels[i] < levels[i-1])
+    lateral = sum(1 for i in range(1, len(levels)) if levels[i] == levels[i-1])
+
+    total_moves = len(levels) - 1
+    if total_moves == 0:
+        return 0.5
+
+    # Trajectory score
+    trajectory = (upward - downward * 0.5) / total_moves
+
+    # Bonus if current role is most senior
+    if levels[-1] == max(levels):
+        trajectory += 0.2
+
+    return round(min(max(trajectory, 0.0), 1.0), 4)
 
 
 def score_experience(profile):
@@ -136,32 +214,36 @@ def score_location(profile, signals):
 
 
 def compute_score(candidate):
-    """Combine all components into a final weighted score 0-1."""
     profile = candidate["profile"]
     career = candidate["career_history"]
     skills = candidate.get("skills", [])
     education = candidate.get("education", [])
     signals = candidate["redrob_signals"]
+    assessment_scores = signals.get("skill_assessment_scores", {})
 
-    s_skills   = score_skills(skills)
-    s_career   = score_career(career)
-    s_exp      = score_experience(profile)
-    s_edu      = score_education(education)
-    s_location = score_location(profile, signals)
+    s_skills      = score_skills(skills, assessment_scores)
+    s_career      = score_career(career)
+    s_trajectory  = score_trajectory(career)
+    s_exp         = score_experience(profile)
+    s_edu         = score_education(education)
+    s_location    = score_location(profile, signals)
 
-    # Weighted combination
+    # Trajectory slightly adjusts career score
+    s_career_final = (0.7 * s_career) + (0.3 * s_trajectory)
+
     final = (
-        0.30 * s_career   +   # most important — substance
-        0.25 * s_skills   +   # verified skill depth
-        0.20 * s_exp      +   # experience fit
-        0.15 * s_location +   # location
-        0.10 * s_edu          # education (least important)
+        0.30 * s_career_final +
+        0.25 * s_skills       +
+        0.20 * s_exp          +
+        0.15 * s_location     +
+        0.10 * s_edu
     )
 
     return round(final, 4), {
-        "career": s_career,
+        "career": s_career_final,
         "skills": s_skills,
         "experience": s_exp,
         "education": s_edu,
-        "location": s_location
+        "location": s_location,
+        "trajectory": s_trajectory
     }
