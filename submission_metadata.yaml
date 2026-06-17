@@ -1,0 +1,49 @@
+team_name: "chhayanka17"
+
+primary_contact:
+  name: "Chhayanka Dabhadker"
+  email: "chhayankadabhadker17@gmail.com"
+  phone: "+91-9993100769"
+
+team_members:
+  - name: "Chhayanka Dabhadker"
+    email: "chhayankadabhadker17@gmail.com"
+    role: "Solo participant/ ML Enthusiast"
+
+github_repo: "https://github.com/chhayanka17/redrob_ranker"
+sandbox_link: "https://redrobranker-v2ljj6dvmzaxpcqmxlpmr5.streamlit.app/"
+reproduce_command: "python rank.py --candidates candidates.jsonl --out submission.csv"
+
+compute:
+  platform: "Windows PC"
+  cpu_cores: 12
+  ram_gb: 16
+  python_version: "3.14.2"
+  os: "Windows 11"
+  uses_gpu_for_inference: false
+  has_network_during_ranking: false
+  pre_computation_required: false
+  pre_computation_time_minutes: 0
+
+ai_tools_used:
+  - "Claude"
+
+ai_usage_summary: |
+  Used Claude for architecture discussion, code review and guidance.
+  No candidate data was fed to any LLM. All ranking logic is original
+  rule-based code running fully offline.
+
+methodology_summary: |
+  Rule-based ranker with 5 scoring components: career substance (30%),
+  skills match (25%), experience fit (20%), location (15%), education (10%).
+  Hard filters eliminate 90%+ of candidates instantly. Honeypot detection
+  removes impossible profiles. Behavioral signal multiplier reorders by
+  availability, responsiveness, notice period and GitHub activity.
+  Runs in under 2 seconds on 100K candidates, fully CPU-based, no network.
+
+declarations:
+  read_submission_spec: true
+  code_is_original_work: true
+  no_collusion: true
+  honeypot_check_done: true
+  reproduction_tested: true
