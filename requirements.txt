@@ -1,3 +1,4 @@
 pandas
 tqdm
 python-dateutil
+streamlit
